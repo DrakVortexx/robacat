@@ -70,6 +70,38 @@ Pads accumulate income each second; click a pad to collect into your wallet.
 | `collectPad` | `spawnCat` |
 | `actionUpdate` | `playerJoined` |
 
+## Deploy on Render (Node.js Web Service)
+
+This app is a single Node process: Express serves the static site and WebSockets run on the same port (required for Render).
+
+### Option A — Dashboard
+
+1. Push latest code to [github.com/DrakVortexx/robacat](https://github.com/DrakVortexx/robacat).
+2. In [Render](https://render.com), **New → Web Service**.
+3. Connect the `robacat` repo.
+4. Settings:
+   - **Runtime:** Node
+   - **Build command:** `npm install`
+   - **Start command:** `npm start`
+   - **Health check path:** `/api/health`
+5. Deploy. Open `https://YOUR-SERVICE.onrender.com/browser.html`.
+
+WebSockets use `wss://` automatically when the site is served over HTTPS (launchers use `location.host`).
+
+### Option B — Blueprint (`render.yaml`)
+
+1. **New → Blueprint** in Render.
+2. Select this repo — Render reads `render.yaml` and creates the web service.
+
+### Render notes
+
+| Topic | Detail |
+|--------|--------|
+| **Port** | Render sets `PORT`; `server.js` already uses it. |
+| **Electron** | Desktop `app.html` must load your Render URL (not localhost) unless you run the server locally. |
+| **Free tier** | Service sleeps after ~15 min idle; first visit may take ~1 min to wake. WebSocket players disconnect on sleep. |
+| **Player data** | Stored in memory only — resets on redeploy or instance restart. Use a database later for persistence. |
+
 ## Future-ready
 
 Architecture supports cosmetics store, VIP servers, paid boosts, and live events without restructuring core folders.

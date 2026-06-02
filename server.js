@@ -95,6 +95,11 @@ function generateRoomCode() {
 
 // ─── Express static ──────────────────────────────────────────────────────────
 const app = express();
+
+app.get('/', (_req, res) => {
+  res.redirect('/browser.html');
+});
+
 app.use(express.static(path.join(__dirname)));
 
 const server = http.createServer(app);
@@ -355,7 +360,8 @@ app.post('/api/private-code', (_req, res) => {
   res.json({ code });
 });
 
-server.listen(PORT, () => {
-  console.log(`Rob a Cat server running at http://localhost:${PORT}`);
-  console.log(`WebSocket: ws://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log(`Rob a Cat server listening on ${HOST}:${PORT}`);
 });
