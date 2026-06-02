@@ -1,14 +1,18 @@
+require('dotenv').config();
+
 const http = require('http');
 const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const { PORT, HOST, TICK_MS, PERSIST_ON_DISCONNECT, PERSIST_DEBOUNCE_MS } = require('./server/config');
-const { PlayerStore } = require('./server/db/playerStore');
+const { createPlayerStore } = require('./server/db/createStore');
 const { rooms, getOrCreatePublicRoom, getOrCreatePrivateRoom, generateRoomCode } = require('./server/rooms');
 const { tickIncome, collectPad, spawnCat, doRebirth, isUsernameTakenInRoom } = require('./server/playerLogic');
 
-const playerStore = new PlayerStore();
+/** @type {import('./server/db/playerStore').PlayerStore} */
+let playerStore;
+let dbBackend = 'memory';
 const clients = new Map(); // ws → { doc, room }
 
 const app = express();
@@ -20,7 +24,12 @@ app.get('/', (_req, res) => {
 app.use(express.static(path.join(__dirname)));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, players: clients.size, rooms: rooms.size });
+  res.json({
+    ok: true,
+    database: dbBackend,
+    players: clients.size,
+    rooms: rooms.size,
+  });
 });
 
 /** Database-ready export (for future backup / admin) */
@@ -85,32 +94,35 @@ function removeClient(ws) {
   clients.delete(ws);
 }
 
-setInterval(() => {
-  for (const room of rooms.values()) {
-    let changed = false;
-    for (const [ws, doc] of room.players) {
-      const updated = tickIncome(doc);
-      if (updated !== doc) {
-        room.players.set(ws, updated);
-        changed = true;
-        persist(updated);
-      }
-    }
-    if (changed && room.players.size > 0) {
+function startIncomeTick() {
+  setInterval(() => {
+    if (!playerStore) return;
+    for (const room of rooms.values()) {
+      let changed = false;
       for (const [ws, doc] of room.players) {
-        send(ws, 'updateMoney', {
-          money: doc.money,
-          padBalances: doc.slots.map((s) => s.padBalance),
-          cats: doc.slots.map((s) => ({
-            index: s.slotIndex,
-            cat: s.cat,
-            padBalance: s.padBalance,
-          })),
-        });
+        const updated = tickIncome(doc);
+        if (updated !== doc) {
+          room.players.set(ws, updated);
+          changed = true;
+          persist(updated);
+        }
+      }
+      if (changed && room.players.size > 0) {
+        for (const [ws, doc] of room.players) {
+          send(ws, 'updateMoney', {
+            money: doc.money,
+            padBalances: doc.slots.map((s) => s.padBalance),
+            cats: doc.slots.map((s) => ({
+              index: s.slotIndex,
+              cat: s.cat,
+              padBalance: s.padBalance,
+            })),
+          });
+        }
       }
     }
-  }
-}, TICK_MS);
+  }, TICK_MS);
+}
 
 wss.on('connection', (ws) => {
   clients.set(ws, { doc: null, room: null });
@@ -289,6 +301,18 @@ function handleActionUpdate(ws, { action, data }) {
   }
 }
 
-server.listen(PORT, HOST, () => {
-  console.log(`Rob a Cat server listening on ${HOST}:${PORT}`);
+async function start() {
+  const created = await createPlayerStore();
+  playerStore = created.store;
+  dbBackend = created.backend;
+  startIncomeTick();
+
+  server.listen(PORT, HOST, () => {
+    console.log(`Rob a Cat server listening on ${HOST}:${PORT} (db: ${dbBackend})`);
+  });
+}
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

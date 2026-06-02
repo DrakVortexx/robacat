@@ -67,7 +67,27 @@ Server data lives in `server/db/`:
 - **`schema.sql`** — example PostgreSQL tables
 - **`GET /api/players/export`** — export all accounts for backup/migration
 
-Progress **persists by username** across sessions (in-memory until you plug in a real DB).
+Progress **persists by username** — uses **Neon PostgreSQL** when `DATABASE_URL` is set, otherwise in-memory.
+
+### Connect Neon (manual)
+
+1. Create a project at [neon.tech](https://neon.tech) (not Google).
+2. Copy the **production branch** connection string (`postgresql://...?sslmode=require`).
+3. Local — create `.env` from `.env.example` and paste:
+
+   ```bash
+   cp .env.example .env
+   # edit .env → DATABASE_URL=postgresql://...
+   npm install
+   npm run db:migrate
+   npm start
+   ```
+
+4. **Render** — Web Service → **Environment** → add `DATABASE_URL` with the same string → redeploy.
+
+5. Verify: `GET /api/health` should show `"database": "postgres"`.
+
+Tables are created automatically on startup (`server/db/schema.sql`).
 
 ### Income formula
 

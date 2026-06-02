@@ -36,7 +36,18 @@ Use `playerStore.toSqlRows(doc)` for migration scripts.
 1. Implement adapter with `findByUsername`, `findById`, `insert`, `update`, `delete`, `listAll`.
 2. `new PlayerStore(new PostgresAdapter(pool))` in `server.js`.
 
-Today: **`MemoryAdapter`** (in-memory, persists on disconnect + debounced saves while playing).
+## Neon / PostgreSQL (production)
+
+Set `DATABASE_URL` to your Neon connection string. The server uses **`PostgresAdapter`** automatically.
+
+```bash
+cp .env.example .env
+# paste Neon connection string into DATABASE_URL
+npm run db:migrate   # optional — tables also auto-create on start
+npm start
+```
+
+Today without `DATABASE_URL`: **`MemoryAdapter`** (in-memory only).
 
 ## API
 

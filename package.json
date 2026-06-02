@@ -6,13 +6,16 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "db:migrate": "node scripts/db-migrate.js",
     "electron": "electron electron-main.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "pg": "^8.13.1",
     "ws": "^8.18.0"
   }
 }
