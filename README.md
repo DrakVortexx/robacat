@@ -2,6 +2,8 @@
 
 Multiplayer economy game with a web launcher, Electron desktop launcher, Node.js backend, and separate game client.
 
+**Repository:** [github.com/DrakVortexx/robacat](https://github.com/DrakVortexx/robacat)
+
 ## Project structure
 
 ```
