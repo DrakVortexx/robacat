@@ -266,6 +266,24 @@ function initActions() {
     if (!confirm(`Rebirth for ${formatMoney(cost)}? (+25% income per level)`)) return;
     send('actionUpdate', { action: 'rebirth' });
   });
+  
+  // Send player position updates to server
+  let lastPositionUpdate = 0;
+  setInterval(() => {
+    if (world && world.playerPosition) {
+      const now = Date.now();
+      if (now - lastPositionUpdate > 100) { // Update every 100ms
+        send('playerMoved', {
+          position: {
+            x: world.playerPosition.x,
+            y: world.playerPosition.y,
+            z: world.playerPosition.z
+          }
+        });
+        lastPositionUpdate = now;
+      }
+    }
+  }, 100);
 }
 
 initActions();

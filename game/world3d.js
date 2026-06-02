@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const SLOT_COUNT = 8;
 const COLS = 4;
@@ -20,34 +19,40 @@ export class GameWorld3D {
     this.onPadClick = null;
     this.slotMeshes = [];
     this.otherBases = new Map();
+    
+    // Player movement
+    this.playerPosition = new THREE.Vector3(0, 0, 8);
+    this.playerRotation = 0;
+    this.playerVelocity = new THREE.Vector3();
+    this.keys = { w: false, a: false, s: false, d: false };
+    this.playerSpeed = 0.15;
+    this.rotationSpeed = 0.05;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0f1116);
-    this.scene.fog = new THREE.Fog(0x0f1116, 18, 55);
+    this.scene.fog = new THREE.Fog(0x0f1116, 20, 80);
 
     this.camera = new THREE.PerspectiveCamera(
-      50,
+      60,
       window.innerWidth / window.innerHeight,
       0.1,
       200
     );
-    this.camera.position.set(8, 10, 12);
+    
+    // Third-person camera setup
+    this.cameraOffset = new THREE.Vector3(0, 4, -8);
+    this.cameraLookOffset = new THREE.Vector3(0, 2, 5);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
 
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
-    this.controls.target.set(0, 0, 2);
-    this.controls.maxPolarAngle = Math.PI / 2.1;
-    this.controls.minDistance = 6;
-    this.controls.maxDistance = 28;
-
     this._setupLights();
     this._buildEnvironment();
     this._buildPlayerBase(0, 0, true);
+    this._buildPlayerCharacter();
+    this._setupControls();
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -71,9 +76,129 @@ export class GameWorld3D {
     this.scene.add(fill);
   }
 
+  _setupControls() {
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if (this.keys.hasOwnProperty(key)) {
+        this.keys[key] = true;
+      }
+    });
+    
+    window.addEventListener('keyup', (e) => {
+      const key = e.key.toLowerCase();
+      if (this.keys.hasOwnProperty(key)) {
+        this.keys[key] = false;
+      }
+    });
+  }
+
+  _buildPlayerCharacter() {
+    // Create a simple blocky player character (Roblox-style)
+    this.playerGroup = new THREE.Group();
+    
+    // Body
+    const bodyGeo = new THREE.BoxGeometry(1, 1.5, 0.6);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.75;
+    body.castShadow = true;
+    this.playerGroup.add(body);
+    
+    // Head
+    const headGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xfcd34d });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.9;
+    head.castShadow = true;
+    this.playerGroup.add(head);
+    
+    // Arms
+    const armGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+    
+    const leftArm = new THREE.Mesh(armGeo, armMat);
+    leftArm.position.set(-0.65, 0.8, 0);
+    leftArm.castShadow = true;
+    this.playerGroup.add(leftArm);
+    
+    const rightArm = new THREE.Mesh(armGeo, armMat);
+    rightArm.position.set(0.65, 0.8, 0);
+    rightArm.castShadow = true;
+    this.playerGroup.add(rightArm);
+    
+    // Legs
+    const legGeo = new THREE.BoxGeometry(0.35, 0.8, 0.35);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x1e3a5f });
+    
+    const leftLeg = new THREE.Mesh(legGeo, legMat);
+    leftLeg.position.set(-0.25, -0.4, 0);
+    leftLeg.castShadow = true;
+    this.playerGroup.add(leftLeg);
+    
+    const rightLeg = new THREE.Mesh(legGeo, legMat);
+    rightLeg.position.set(0.25, -0.4, 0);
+    rightLeg.castShadow = true;
+    this.playerGroup.add(rightLeg);
+    
+    this.playerGroup.position.copy(this.playerPosition);
+    this.scene.add(this.playerGroup);
+  }
+
+  _updatePlayerMovement() {
+    // Calculate movement direction based on player rotation
+    const moveDirection = new THREE.Vector3();
+    
+    if (this.keys.w) moveDirection.z += 1;
+    if (this.keys.s) moveDirection.z -= 1;
+    if (this.keys.a) moveDirection.x += 1;
+    if (this.keys.d) moveDirection.x -= 1;
+    
+    if (moveDirection.length() > 0) {
+      moveDirection.normalize();
+      
+      // Rotate movement direction by player rotation
+      const rotatedX = moveDirection.x * Math.cos(this.playerRotation) - moveDirection.z * Math.sin(this.playerRotation);
+      const rotatedZ = moveDirection.x * Math.sin(this.playerRotation) + moveDirection.z * Math.cos(this.playerRotation);
+      
+      this.playerVelocity.x = rotatedX * this.playerSpeed;
+      this.playerVelocity.z = rotatedZ * this.playerSpeed;
+      
+      // Rotate player towards movement direction
+      if (this.keys.w || this.keys.s || this.keys.a || this.keys.d) {
+        const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
+        this.playerRotation = targetRotation;
+      }
+    } else {
+      this.playerVelocity.multiplyScalar(0.9); // Friction
+    }
+    
+    // Apply velocity
+    this.playerPosition.add(this.playerVelocity);
+    
+    // Clamp position to map bounds
+    this.playerPosition.x = Math.max(-35, Math.min(35, this.playerPosition.x));
+    this.playerPosition.z = Math.max(-35, Math.min(35, this.playerPosition.z));
+    
+    // Update player group position and rotation
+    this.playerGroup.position.copy(this.playerPosition);
+    this.playerGroup.rotation.y = this.playerRotation;
+  }
+
+  _updateCamera() {
+    // Calculate camera position behind player
+    const cameraOffset = this.cameraOffset.clone();
+    cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.playerRotation);
+    
+    this.camera.position.copy(this.playerPosition).add(cameraOffset);
+    
+    // Look at player
+    const lookTarget = this.playerPosition.clone().add(this.cameraLookOffset);
+    this.camera.lookAt(lookTarget);
+  }
+
   _buildEnvironment() {
     const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(80, 80),
+      new THREE.PlaneGeometry(100, 100),
       new THREE.MeshStandardMaterial({ color: 0x12151c, roughness: 0.9 })
     );
     floor.rotation.x = -Math.PI / 2;
@@ -81,13 +206,43 @@ export class GameWorld3D {
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    const grid = new THREE.GridHelper(60, 60, 0x2a3140, 0x1a1f28);
+    const grid = new THREE.GridHelper(80, 80, 0x2a3140, 0x1a1f28);
     grid.position.y = 0.01;
     this.scene.add(grid);
+    
+    // Add some decorative elements
+    this._addDecorations();
+  }
+  
+  _addDecorations() {
+    // Add some random structures around the map
+    for (let i = 0; i < 20; i++) {
+      const x = (Math.random() - 0.5) * 70;
+      const z = (Math.random() - 0.5) * 70;
+      
+      // Avoid center area where player starts
+      if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
+      
+      const height = 2 + Math.random() * 4;
+      const width = 2 + Math.random() * 3;
+      
+      const building = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, width),
+        new THREE.MeshStandardMaterial({ 
+          color: 0x1a1f28,
+          roughness: 0.8
+        })
+      );
+      building.position.set(x, height / 2, z);
+      building.castShadow = true;
+      building.receiveShadow = true;
+      this.scene.add(building);
+    }
   }
 
   _buildPlayerBase(offsetX, offsetZ, isSelf) {
     const group = new THREE.Group();
+    // Position base relative to world, not player
     group.position.set(offsetX, 0, offsetZ);
 
     const platform = new THREE.Mesh(
@@ -233,6 +388,7 @@ export class GameWorld3D {
 
   updateSelf(player) {
     if (!this.selfBase) {
+      // Position player's base at a fixed location in the world
       this.selfBase = this._buildPlayerBase(0, 0, true);
       this.slotMeshes = this.selfBase.slots;
     }
@@ -326,13 +482,26 @@ export class GameWorld3D {
 
   _animate() {
     requestAnimationFrame(this._animate);
-    this.controls.update();
+    
+    // Update player movement and camera
+    this._updatePlayerMovement();
+    this._updateCamera();
+    
+    // Animate cats
     const t = performance.now() * 0.001;
     this.slotMeshes.forEach((s, i) => {
       if (s.catGroup.visible) {
         s.catGroup.position.y = 0.85 + Math.sin(t * 2 + i) * 0.05;
       }
     });
+    
+    // Animate player character (simple bobbing when moving)
+    if (this.playerVelocity.length() > 0.01) {
+      this.playerGroup.position.y = this.playerPosition.y + Math.sin(t * 10) * 0.05;
+    } else {
+      this.playerGroup.position.y = this.playerPosition.y;
+    }
+    
     this.renderer.render(this.scene, this.camera);
   }
 
