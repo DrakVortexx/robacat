@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rob a Cat — Game</title>
+  <link rel="stylesheet" href="/game/game.css" />
+</head>
+<body>
+  <div id="loading">
+    <p>Connecting to server…</p>
+  </div>
+
+  <div id="connect-error">
+    <h2>Connection Failed</h2>
+    <p id="error-message">Could not join the game server.</p>
+    <button type="button" class="btn btn-blue" id="btn-retry-exit">Return to Launcher</button>
+  </div>
+
+  <div id="game" class="game-layout">
+    <header class="hud">
+      <div class="hud-left">
+        <div class="stat">
+          <span class="stat-label">Player</span>
+          <span class="stat-value" id="hud-username">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Money</span>
+          <span class="stat-value money" id="hud-money">$0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Rebirth</span>
+          <span class="stat-value" id="hud-rebirth">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Server</span>
+          <span class="stat-value" id="hud-server">—</span>
+        </div>
+      </div>
+      <div class="hud-right">
+        <button type="button" class="btn btn-ghost" id="btn-exit">Exit</button>
+      </div>
+    </header>
+
+    <div class="main-area">
+      <section class="base-section">
+        <h2>Your Base — 8 Slots</h2>
+        <div class="slots-grid" id="slots-grid"></div>
+      </section>
+
+      <aside class="players-section">
+        <h2>Players Online</h2>
+        <div id="players-list"></div>
+      </aside>
+    </div>
+
+    <footer class="actions-bar">
+      <button type="button" class="btn btn-blue" id="btn-add-cat">+ Add Cat (free)</button>
+      <button type="button" class="btn btn-ghost" id="btn-rebirth">Rebirth</button>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/game/game.js"></script>
+</body>
+</html>

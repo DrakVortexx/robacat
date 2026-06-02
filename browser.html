@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rob a Cat — Web Launcher</title>
+  <link rel="stylesheet" href="/launcher.css" />
+</head>
+<body data-launcher="browser">
+  <div class="launcher-wrap">
+    <div class="logo">
+      <h1>🐱 Rob a <span>Cat</span></h1>
+      <p>Multiplayer economy · Web</p>
+    </div>
+
+    <div id="error-box" class="error-box" hidden></div>
+
+    <!-- Login -->
+    <section id="screen-login" class="screen active">
+      <h2>Sign In</h2>
+      <div class="field">
+        <label for="username-input">Username</label>
+        <input type="text" id="username-input" placeholder="YourUsername" maxlength="20" autocomplete="username" />
+      </div>
+      <button type="button" class="btn btn-primary" id="login-btn">Play</button>
+    </section>
+
+    <!-- Main Menu -->
+    <section id="screen-menu" class="screen">
+      <p class="welcome">Welcome, <strong id="display-name">Player</strong></p>
+      <button type="button" class="btn btn-primary" id="btn-play">Play</button>
+      <button type="button" class="btn btn-secondary" id="btn-cosmetics">Cosmetics</button>
+      <button type="button" class="btn btn-secondary" id="btn-settings">Settings</button>
+      <button type="button" class="btn btn-ghost" id="btn-logout">Switch Account</button>
+    </section>
+
+    <!-- Server Select -->
+    <section id="screen-servers" class="screen">
+      <h2>Choose Server</h2>
+
+      <div class="server-card">
+        <h3>🌍 Public Server</h3>
+        <p>Join the main lobby with everyone.</p>
+        <button type="button" class="btn btn-primary" id="play-public">Join Public</button>
+      </div>
+
+      <div class="server-card">
+        <h3>🔒 Private Server</h3>
+        <p>Enter a room code or generate one for friends.</p>
+        <div class="field">
+          <label for="private-code">Room Code</label>
+          <input type="text" id="private-code" placeholder="ABCD12" maxlength="12" />
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" id="generate-code">Generate</button>
+          <button type="button" class="btn btn-primary" id="play-private">Join Private</button>
+        </div>
+      </div>
+
+      <p id="connection-status" class="status"></p>
+      <button type="button" class="btn btn-ghost" data-back="menu">← Back</button>
+    </section>
+
+    <!-- Cosmetics -->
+    <section id="screen-cosmetics" class="screen">
+      <h2>Cosmetics</h2>
+      <p class="coming-soon">Store coming soon — VIP hats, trails, base skins</p>
+      <div class="cosmetic-grid">
+        <div class="cosmetic-item owned" title="Default">🐱</div>
+        <div class="cosmetic-item" title="VIP Crown">👑</div>
+        <div class="cosmetic-item" title="Neon Trail">✨</div>
+        <div class="cosmetic-item" title="Gold Base">🏠</div>
+        <div class="cosmetic-item" title="Shadow Aura">🌑</div>
+        <div class="cosmetic-item" title="Event Skin">🎉</div>
+      </div>
+      <button type="button" class="btn btn-ghost" data-back="menu">← Back</button>
+    </section>
+
+    <!-- Settings -->
+    <section id="screen-settings" class="screen">
+      <h2>Settings</h2>
+      <div class="range-field field">
+        <label for="setting-volume">Music Volume</label>
+        <input type="range" id="setting-volume" min="0" max="100" value="80" />
+      </div>
+      <div class="range-field field">
+        <label for="setting-sfx">SFX Volume</label>
+        <input type="range" id="setting-sfx" min="0" max="100" value="80" />
+      </div>
+      <button type="button" class="btn btn-primary" id="save-settings">Save</button>
+      <button type="button" class="btn btn-ghost" data-back="menu">← Back</button>
+    </section>
+  </div>
+
+  <script src="/launcher.js"></script>
+</body>
+</html>
