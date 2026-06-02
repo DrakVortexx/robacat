@@ -3,12 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rob a Cat — Game</title>
+  <title>Rob a Cat — 3D Game</title>
   <link rel="stylesheet" href="/game/game.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <div id="loading">
-    <p>Connecting to server…</p>
+    <p>Loading 3D world…</p>
   </div>
 
   <div id="connect-error">
@@ -18,7 +26,9 @@
   </div>
 
   <div id="game" class="game-layout">
-    <header class="hud">
+    <canvas id="game-canvas"></canvas>
+
+    <header class="hud overlay">
       <div class="hud-left">
         <div class="stat">
           <span class="stat-label">Player</span>
@@ -42,26 +52,20 @@
       </div>
     </header>
 
-    <div class="main-area">
-      <section class="base-section">
-        <h2>Your Base — 8 Slots</h2>
-        <div class="slots-grid" id="slots-grid"></div>
-      </section>
+    <aside class="players-panel overlay">
+      <h2>Players Online</h2>
+      <div id="players-list"></div>
+    </aside>
 
-      <aside class="players-section">
-        <h2>Players Online</h2>
-        <div id="players-list"></div>
-      </aside>
-    </div>
-
-    <footer class="actions-bar">
-      <button type="button" class="btn btn-blue" id="btn-add-cat">+ Add Cat (free)</button>
+    <footer class="actions-bar overlay">
+      <span class="hint">Click green pads to collect · Drag to orbit camera</span>
+      <button type="button" class="btn btn-blue" id="btn-add-cat">+ Add Cat</button>
       <button type="button" class="btn btn-ghost" id="btn-rebirth">Rebirth</button>
     </footer>
   </div>
 
   <div id="toast" class="toast"></div>
 
-  <script src="/game/game.js"></script>
+  <script type="module" src="/game/game.js"></script>
 </body>
 </html>

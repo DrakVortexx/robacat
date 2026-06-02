@@ -37,21 +37,37 @@ Open **http://localhost:3847/browser.html** in your browser.
 | Desktop launcher | http://localhost:3847/app.html |
 | Game (after Play) | http://localhost:3847/game/game.html |
 
-## Electron (optional)
+## Electron desktop (movable shell)
+
+Use **`electron-shell/`** — a separate folder you can copy out of this repo. It builds a desktop app that iframes `https://robacatd.onrender.com/app.html` (no local server required).
 
 ```bash
-npm install --save-dev electron
-npm start          # terminal 1
-npm run electron   # terminal 2 (add script below if needed)
+cd electron-shell
+npm install
+npm start              # dev window
+npm run dist:mac       # Universal macOS .dmg
 ```
 
-Or run: `npx electron electron-main.js` while the server is running.
+See `electron-shell/README.md` for details.
+
+Legacy local dev: `electron-main.js` at repo root (loads localhost while `npm start` runs).
 
 ## How it works
 
 1. **Launchers** (`browser.html` / `app.html`) — login, pick public or private server, connect via WebSocket, then redirect to the game.
 2. **Server** (`server.js`) — authoritative economy: cat values, income ticks every 1s, pad balances, rebirth, rooms.
-3. **Game** (`game/game.html`) — 8-slot base, green income pads, collect money, see other players live.
+3. **Game** (`game/game.html`) — **3D** base (Three.js), 8 slots, green income pads (click in 3D), orbit camera, other players’ bases around you.
+
+### Player data (database-ready)
+
+Server data lives in `server/db/`:
+
+- **`PlayerDocument`** — normalized JSON per account (UUID, slots, cosmetics, timestamps)
+- **`PlayerStore`** — memory backend today; swap for Postgres/Mongo via adapter
+- **`schema.sql`** — example PostgreSQL tables
+- **`GET /api/players/export`** — export all accounts for backup/migration
+
+Progress **persists by username** across sessions (in-memory until you plug in a real DB).
 
 ### Income formula
 

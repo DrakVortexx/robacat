@@ -3,97 +3,14 @@ const path = require('path');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.PORT || 3847;
-const TICK_MS = 1000;
-const SLOT_COUNT = 8;
+const { PORT, HOST, TICK_MS, PERSIST_ON_DISCONNECT, PERSIST_DEBOUNCE_MS } = require('./server/config');
+const { PlayerStore } = require('./server/db/playerStore');
+const { rooms, getOrCreatePublicRoom, getOrCreatePrivateRoom, generateRoomCode } = require('./server/rooms');
+const { tickIncome, collectPad, spawnCat, doRebirth, isUsernameTakenInRoom } = require('./server/playerLogic');
 
-// ─── Economy config (server-authoritative) ───────────────────────────────────
-const CAT_CATALOG = {
-  tabby: { name: 'Tabby', value: 10, trait: 'none', traitMultiplier: 1 },
-  siamese: { name: 'Siamese', value: 25, trait: 'lucky', traitMultiplier: 1.2 },
-  persian: { name: 'Persian', value: 50, trait: 'royal', traitMultiplier: 1.5 },
-  maine: { name: 'Maine Coon', value: 100, trait: 'giant', traitMultiplier: 1.8 },
-  shadow: { name: 'Shadow Cat', value: 250, trait: 'stealth', traitMultiplier: 2 },
-};
+const playerStore = new PlayerStore();
+const clients = new Map(); // ws → { doc, room }
 
-const REBIRTH_MULTIPLIER_BASE = 1;
-const REBIRTH_MULTIPLIER_STEP = 0.25;
-
-function rebirthMultiplier(rebirth) {
-  return REBIRTH_MULTIPLIER_BASE + rebirth * REBIRTH_MULTIPLIER_STEP;
-}
-
-function calcIncome(cat) {
-  if (!cat) return 0;
-  const def = CAT_CATALOG[cat.type] || CAT_CATALOG.tabby;
-  return Math.floor(def.value * rebirthMultiplier(cat.rebirth ?? 0) * def.traitMultiplier);
-}
-
-function defaultSlots() {
-  return Array.from({ length: SLOT_COUNT }, (_, i) => ({
-    index: i,
-    cat: i === 0 ? { type: 'tabby', rebirth: 0 } : null,
-    padBalance: 0,
-  }));
-}
-
-function createPlayer(username, serverId) {
-  return {
-    id: `${serverId}:${username}:${Date.now()}`,
-    username,
-    money: 0,
-    rebirth: 0,
-    slots: SLOT_COUNT,
-    cats: defaultSlots(),
-    cosmetics: [],
-    serverId,
-    padBalances: Array(SLOT_COUNT).fill(0),
-  };
-}
-
-function playerSnapshot(p) {
-  return {
-    id: p.id,
-    username: p.username,
-    money: p.money,
-    rebirth: p.rebirth,
-    slots: p.slots,
-    cats: p.cats,
-    cosmetics: p.cosmetics,
-    serverId: p.serverId,
-    padBalances: p.padBalances,
-  };
-}
-
-// ─── Room manager ────────────────────────────────────────────────────────────
-const rooms = new Map(); // roomId -> { type, code?, players: Map<ws, player> }
-
-function getOrCreatePublicRoom() {
-  const id = 'public';
-  if (!rooms.has(id)) {
-    rooms.set(id, { id, type: 'public', code: null, players: new Map() });
-  }
-  return rooms.get(id);
-}
-
-function getOrCreatePrivateRoom(code) {
-  const id = `private:${code.toUpperCase()}`;
-  if (!rooms.has(id)) {
-    rooms.set(id, { id, type: 'private', code: code.toUpperCase(), players: new Map() });
-  }
-  return rooms.get(id);
-}
-
-function generateRoomCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
-}
-
-// ─── Express static ──────────────────────────────────────────────────────────
 const app = express();
 
 app.get('/', (_req, res) => {
@@ -102,19 +19,24 @@ app.get('/', (_req, res) => {
 
 app.use(express.static(path.join(__dirname)));
 
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, players: clients.size, rooms: rooms.size });
+});
+
+/** Database-ready export (for future backup / admin) */
+app.get('/api/players/export', async (_req, res) => {
+  const data = await playerStore.exportAll();
+  res.json({ count: data.length, players: data });
+});
+
+app.post('/api/private-code', (_req, res) => {
+  const code = generateRoomCode();
+  getOrCreatePrivateRoom(code);
+  res.json({ code });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
-const clients = new Map(); // ws -> { player, room }
-
-function broadcastRoom(room, event, payload, excludeWs = null) {
-  const msg = JSON.stringify({ event, ...payload });
-  for (const [ws] of room.players) {
-    if (ws !== excludeWs && ws.readyState === 1) {
-      ws.send(msg);
-    }
-  }
-}
 
 function send(ws, event, payload = {}) {
   if (ws.readyState === 1) {
@@ -122,21 +44,39 @@ function send(ws, event, payload = {}) {
   }
 }
 
+function broadcastRoom(room, event, payload, excludeWs = null) {
+  const msg = JSON.stringify({ event, ...payload });
+  for (const [ws] of room.players) {
+    if (ws !== excludeWs && ws.readyState === 1) ws.send(msg);
+  }
+}
+
 function syncRoom(room) {
   const players = [];
-  for (const [, player] of room.players) {
-    players.push(playerSnapshot(player));
+  for (const [, doc] of room.players) {
+    players.push(playerStore.toSnapshot(doc));
   }
   broadcastRoom(room, 'syncState', { players, serverTime: Date.now() });
+}
+
+function persist(doc) {
+  playerStore.scheduleSave(doc, PERSIST_DEBOUNCE_MS);
+}
+
+async function persistNow(doc) {
+  await playerStore.flush(doc);
 }
 
 function removeClient(ws) {
   const meta = clients.get(ws);
   if (!meta) return;
-  const { room, player } = meta;
-  if (room && player) {
+
+  const { room, doc } = meta;
+  if (room && doc) {
     room.players.delete(ws);
-    broadcastRoom(room, 'playerLeft', { username: player.username });
+    doc.activeServerId = null;
+    if (PERSIST_ON_DISCONNECT) persistNow(doc).catch(console.error);
+    broadcastRoom(room, 'playerLeft', { username: doc.username });
     syncRoom(room);
     if (room.type === 'private' && room.players.size === 0) {
       rooms.delete(room.id);
@@ -145,36 +85,35 @@ function removeClient(ws) {
   clients.delete(ws);
 }
 
-// ─── Tick loop (income generation) ───────────────────────────────────────────
 setInterval(() => {
   for (const room of rooms.values()) {
     let changed = false;
-    for (const [, player] of room.players) {
-      for (let i = 0; i < SLOT_COUNT; i++) {
-        const slot = player.cats[i];
-        if (slot && slot.cat) {
-          const income = calcIncome(slot.cat);
-          player.padBalances[i] = (player.padBalances[i] || 0) + income;
-          slot.padBalance = player.padBalances[i];
-          changed = true;
-        }
+    for (const [ws, doc] of room.players) {
+      const updated = tickIncome(doc);
+      if (updated !== doc) {
+        room.players.set(ws, updated);
+        changed = true;
+        persist(updated);
       }
     }
     if (changed && room.players.size > 0) {
-      for (const [ws, player] of room.players) {
+      for (const [ws, doc] of room.players) {
         send(ws, 'updateMoney', {
-          money: player.money,
-          padBalances: player.padBalances,
-          cats: player.cats,
+          money: doc.money,
+          padBalances: doc.slots.map((s) => s.padBalance),
+          cats: doc.slots.map((s) => ({
+            index: s.slotIndex,
+            cat: s.cat,
+            padBalance: s.padBalance,
+          })),
         });
       }
     }
   }
 }, TICK_MS);
 
-// ─── WebSocket handlers ──────────────────────────────────────────────────────
 wss.on('connection', (ws) => {
-  clients.set(ws, { player: null, room: null });
+  clients.set(ws, { doc: null, room: null });
 
   ws.on('message', (raw) => {
     let data;
@@ -186,7 +125,6 @@ wss.on('connection', (ws) => {
     }
 
     const { event, ...payload } = data;
-
     switch (event) {
       case 'joinServer':
         handleJoinServer(ws, payload);
@@ -209,7 +147,7 @@ wss.on('connection', (ws) => {
   ws.on('error', () => removeClient(ws));
 });
 
-function handleJoinServer(ws, { username, serverType, roomCode }) {
+async function handleJoinServer(ws, { username, serverType, roomCode }) {
   if (!username || typeof username !== 'string' || username.trim().length < 2) {
     send(ws, 'error', { message: 'Username must be at least 2 characters' });
     return;
@@ -228,26 +166,33 @@ function handleJoinServer(ws, { username, serverType, roomCode }) {
     room = getOrCreatePublicRoom();
   }
 
-  for (const [, p] of room.players) {
-    if (p.username.toLowerCase() === name.toLowerCase()) {
-      send(ws, 'error', { message: 'Username already taken in this server' });
-      return;
-    }
+  if (isUsernameTakenInRoom(room, name)) {
+    send(ws, 'error', { message: 'Username already taken in this server' });
+    return;
   }
 
-  const player = createPlayer(name, room.id);
-  room.players.set(ws, player);
-  clients.set(ws, { player, room });
+  try {
+    const doc = await playerStore.findOrCreate(name, { serverId: room.id });
+    doc.activeServerId = room.id;
+    doc.position = doc.position || { x: 0, z: 0 };
 
-  send(ws, 'joined', {
-    roomId: room.id,
-    roomType: room.type,
-    roomCode: room.code,
-    player: playerSnapshot(player),
-  });
+    room.players.set(ws, doc);
+    clients.set(ws, { doc, room });
+    await persistNow(doc);
 
-  broadcastRoom(room, 'playerJoined', { player: playerSnapshot(player) }, ws);
-  syncRoom(room);
+    send(ws, 'joined', {
+      roomId: room.id,
+      roomType: room.type,
+      roomCode: room.code,
+      player: playerStore.toSnapshot(doc),
+    });
+
+    broadcastRoom(room, 'playerJoined', { player: playerStore.toSnapshot(doc) }, ws);
+    syncRoom(room);
+  } catch (err) {
+    console.error('joinServer', err);
+    send(ws, 'error', { message: 'Failed to load player data' });
+  }
 }
 
 function handleRequestState(ws) {
@@ -258,109 +203,91 @@ function handleRequestState(ws) {
   }
   syncRoom(meta.room);
   send(ws, 'syncState', {
-    players: [...meta.room.players.values()].map(playerSnapshot),
-    self: meta.player ? playerSnapshot(meta.player) : null,
+    players: [...meta.room.players.values()].map((d) => playerStore.toSnapshot(d)),
+    self: meta.doc ? playerStore.toSnapshot(meta.doc) : null,
     serverTime: Date.now(),
   });
 }
 
 function handleCollectPad(ws, { slotIndex }) {
   const meta = clients.get(ws);
-  if (!meta?.player || !meta.room) {
+  if (!meta?.doc || !meta.room) {
     send(ws, 'error', { message: 'Not in a server' });
     return;
   }
 
   const idx = Number(slotIndex);
-  if (idx < 0 || idx >= SLOT_COUNT) {
-    send(ws, 'error', { message: 'Invalid slot' });
-    return;
-  }
+  const { doc, collected } = collectPad(meta.doc, idx);
+  if (collected <= 0) return;
 
-  const player = meta.player;
-  const amount = player.padBalances[idx] || 0;
-  if (amount <= 0) return;
-
-  player.money += amount;
-  player.padBalances[idx] = 0;
-  if (player.cats[idx]) {
-    player.cats[idx].padBalance = 0;
-  }
+  meta.doc = doc;
+  meta.room.players.set(ws, doc);
+  persist(doc);
 
   send(ws, 'updateMoney', {
-    money: player.money,
-    padBalances: player.padBalances,
-    collected: amount,
+    money: doc.money,
+    padBalances: doc.slots.map((s) => s.padBalance),
+    collected,
     slotIndex: idx,
   });
 
   broadcastRoom(meta.room, 'syncState', {
-    players: [...meta.room.players.values()].map(playerSnapshot),
+    players: [...meta.room.players.values()].map((d) => playerStore.toSnapshot(d)),
     serverTime: Date.now(),
   });
 }
 
 function handleActionUpdate(ws, { action, data }) {
   const meta = clients.get(ws);
-  if (!meta?.player || !meta.room) return;
+  if (!meta?.doc || !meta.room) return;
 
-  const player = meta.player;
+  let doc = meta.doc;
 
   switch (action) {
     case 'spawnCat': {
-      const { slotIndex, catType } = data || {};
-      const idx = Number(slotIndex);
-      if (idx < 0 || idx >= SLOT_COUNT) return;
-      const type = catType && CAT_CATALOG[catType] ? catType : 'tabby';
-      player.cats[idx] = {
-        index: idx,
-        cat: { type, rebirth: player.rebirth },
-        padBalance: player.padBalances[idx] || 0,
-      };
+      doc = spawnCat(doc, data?.slotIndex, data?.catType);
+      meta.doc = doc;
+      meta.room.players.set(ws, doc);
+      persist(doc);
       broadcastRoom(meta.room, 'spawnCat', {
-        username: player.username,
-        slotIndex: idx,
-        cat: player.cats[idx],
+        username: doc.username,
+        slotIndex: data?.slotIndex,
       });
       syncRoom(meta.room);
       break;
     }
     case 'rebirth': {
-      const cost = 1000 * (player.rebirth + 1);
-      if (player.money < cost) {
-        send(ws, 'error', { message: `Need $${cost} to rebirth` });
+      const result = doRebirth(doc);
+      if (result.error) {
+        send(ws, 'error', { message: result.error });
         return;
       }
-      player.money -= cost;
-      player.rebirth += 1;
-      for (const slot of player.cats) {
-        if (slot?.cat) slot.cat.rebirth = player.rebirth;
-      }
+      doc = result.doc;
+      meta.doc = doc;
+      meta.room.players.set(ws, doc);
+      persist(doc);
       send(ws, 'updateMoney', {
-        money: player.money,
-        rebirth: player.rebirth,
-        padBalances: player.padBalances,
+        money: doc.money,
+        rebirth: doc.rebirth,
+        padBalances: doc.slots.map((s) => s.padBalance),
       });
       syncRoom(meta.room);
+      break;
+    }
+    case 'setPosition': {
+      doc.position = { x: data.x, z: data.z };
+      meta.doc = doc;
+      meta.room.players.set(ws, doc);
+      broadcastRoom(meta.room, 'playerMoved', {
+        username: doc.username,
+        position: doc.position,
+      });
       break;
     }
     default:
       break;
   }
 }
-
-// Health check for launchers
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, players: clients.size, rooms: rooms.size });
-});
-
-app.post('/api/private-code', (_req, res) => {
-  const code = generateRoomCode();
-  getOrCreatePrivateRoom(code);
-  res.json({ code });
-});
-
-const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
   console.log(`Rob a Cat server listening on ${HOST}:${PORT}`);
