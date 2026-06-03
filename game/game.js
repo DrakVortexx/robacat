@@ -146,6 +146,17 @@ function initWorld() {
     if (bal > 0) send('collectPad', { slotIndex });
     else showToast('Nothing to collect yet');
   };
+  
+  // Cat pickup handler
+  world.onCatPickup = (catType) => {
+    showToast(`Picked up ${CAT_NAMES[catType]}!`);
+  };
+  
+  // Cat placement handler
+  world.onCatPlace = (slotIndex, catType) => {
+    send('actionUpdate', { action: 'spawnCat', data: { slotIndex, catType } });
+    showToast(`Placed ${CAT_NAMES[catType]} in slot!`);
+  };
 }
 
 function connect() {
@@ -174,6 +185,7 @@ function connect() {
       JSON.stringify({
         event: 'joinServer',
         username: session.username,
+        password: session.password || '',
         serverType,
         roomCode: session.roomCode,
       })
@@ -249,17 +261,6 @@ function findEmptySlot() {
 function initActions() {
   $('btn-exit')?.addEventListener('click', exitToLauncher);
   $('btn-retry-exit')?.addEventListener('click', exitToLauncher);
-
-  $('btn-add-cat')?.addEventListener('click', () => {
-    const idx = findEmptySlot();
-    if (idx < 0) {
-      showToast('All slots full!');
-      return;
-    }
-    const type = CAT_TYPES[Math.floor(Math.random() * CAT_TYPES.length)];
-    send('actionUpdate', { action: 'spawnCat', data: { slotIndex: idx, catType: type } });
-    showToast(`Spawned ${CAT_NAMES[type]}!`);
-  });
 
   $('btn-rebirth')?.addEventListener('click', () => {
     const cost = 1000 * ((selfPlayer?.rebirth ?? 0) + 1);

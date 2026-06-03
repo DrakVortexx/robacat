@@ -16,6 +16,7 @@
 
   const els = {
     usernameInput: document.getElementById('username-input'),
+    passwordInput: document.getElementById('password-input'),
     loginBtn: document.getElementById('login-btn'),
     displayName: document.getElementById('display-name'),
     status: document.getElementById('connection-status'),
@@ -28,6 +29,7 @@
 
   let ws = null;
   let username = localStorage.getItem(STORAGE_USER) || '';
+  let password = '';
   const isElectron = document.body.dataset.launcher === 'electron';
   const gameExitTarget = isElectron ? '/app.html' : '/browser.html';
 
@@ -75,6 +77,7 @@
       SESSION_GAME,
       JSON.stringify({
         username,
+        password,
         wsUrl: getWsUrl(),
         roomId: roomData.roomId,
         roomType: roomData.roomType,
@@ -120,6 +123,7 @@
           JSON.stringify({
             event: 'joinServer',
             username,
+            password,
             serverType,
             roomCode: roomCode || undefined,
           })
@@ -185,11 +189,17 @@
 
     els.loginBtn?.addEventListener('click', () => {
       const name = els.usernameInput?.value.trim();
+      const pass = els.passwordInput?.value.trim();
       if (!name || name.length < 2) {
         showError('Enter a username (2+ characters).');
         return;
       }
+      if (!pass || pass.length < 4) {
+        showError('Enter a password (4+ characters).');
+        return;
+      }
       username = name;
+      password = pass;
       localStorage.setItem(STORAGE_USER, username);
       if (els.displayName) els.displayName.textContent = username;
       showScreen('menu');
@@ -198,7 +208,7 @@
 
     if (username.length >= 2) {
       if (els.displayName) els.displayName.textContent = username;
-      showScreen('menu');
+      showScreen('login'); // Always show login to require password
     } else {
       showScreen('login');
     }

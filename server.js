@@ -27,6 +27,9 @@ app.get('/game', (req, res) => {
 // Player data storage (in-memory for now)
 const players = new Map();
 
+// User password storage (in-memory for now, will be replaced with Neon DB)
+const userPasswords = new Map();
+
 // Server tick loop for income generation
 setInterval(() => {
   for (const [roomId, room] of rooms) {
@@ -60,7 +63,31 @@ wss.on('connection', (ws) => {
       
       switch (message.event) {
         case 'joinServer': {
-          const { username, serverType, roomCode } = message;
+          const { username, password, serverType, roomCode } = message;
+          
+          // Validate password
+          if (!password || password.length < 4) {
+            ws.send(JSON.stringify({
+              event: 'error',
+              message: 'Password must be at least 4 characters'
+            }));
+            return;
+          }
+          
+          // Check if user exists and verify password
+          if (userPasswords.has(username)) {
+            const storedPassword = userPasswords.get(username);
+            if (storedPassword !== password) {
+              ws.send(JSON.stringify({
+                event: 'error',
+                message: 'Incorrect password'
+              }));
+              return;
+            }
+          } else {
+            // New user - store password
+            userPasswords.set(username, password);
+          }
           
           // Get or create room
           if (serverType === 'private' && roomCode) {
@@ -69,7 +96,7 @@ wss.on('connection', (ws) => {
             currentRoom = getOrCreatePublicRoom();
           }
           
-          // Check if username is taken
+          // Check if username is taken in this room
           if (isUsernameTakenInRoom(currentRoom, username)) {
             ws.send(JSON.stringify({
               event: 'error',

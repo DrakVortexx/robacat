@@ -24,20 +24,18 @@ export class GameWorld3D {
     this.playerPosition = new THREE.Vector3(0, 0, 8);
     this.playerRotation = 0;
     this.playerVelocity = new THREE.Vector3();
-    this.keys = { w: false, a: false, s: false, d: false, space: false };
-    this.playerSpeed = 0.08;
+    this.keys = { w: false, a: false, s: false, d: false, space: false, e: false };
+    this.playerSpeed = 0.2;
     this.rotationSpeed = 0.05;
     
-    // Mouse look
-    this.mouseSensitivity = 0.002;
+    // Fixed camera (no mouse look)
     this.cameraPitch = 0;
-    this.isPointerLocked = false;
     
     // Jump physics (Roblox-like)
     this.isGrounded = true;
     this.jumpVelocity = 0;
     this.gravity = -0.015;
-    this.jumpForce = 0.35;
+    this.jumpForce = 0.2;
     this.groundY = 0;
     
     // Particle system
@@ -45,10 +43,21 @@ export class GameWorld3D {
     
     // Collision objects
     this.colliders = [];
+    
+    // Cat interaction system
+    this.catsOnMap = [];
+    this.carriedCat = null;
+    this.interactionProgress = 0;
+    this.interactionDuration = 1700; // 1.7 seconds in ms
+    this.isInteracting = false;
+    this.interactionStartTime = 0;
+    this.interactionType = null; // 'pickup' or 'place'
+    this.nearbyCat = null;
+    this.nearbySlot = null;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1f2e);
-    this.scene.fog = new THREE.Fog(0x1a1f2e, 30, 120);
+    this.scene.background = new THREE.Color(0x87CEEB);
+    this.scene.fog = new THREE.Fog(0x87CEEB, 30, 120);
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -122,22 +131,8 @@ export class GameWorld3D {
       if (e.code === 'Space') {
         this.keys.space = false;
       }
-    });
-    
-    // Pointer lock for mouse look
-    this.canvas.addEventListener('click', () => {
-      this.canvas.requestPointerLock();
-    });
-    
-    document.addEventListener('pointerlockchange', () => {
-      this.isPointerLocked = document.pointerLockElement === this.canvas;
-    });
-    
-    document.addEventListener('mousemove', (e) => {
-      if (this.isPointerLocked) {
-        this.playerRotation -= e.movementX * this.mouseSensitivity;
-        this.cameraPitch -= e.movementY * this.mouseSensitivity;
-        this.cameraPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.cameraPitch));
+      if (e.code === 'KeyE') {
+        this._cancelInteraction();
       }
     });
   }
@@ -200,8 +195,11 @@ export class GameWorld3D {
     
     if (this.keys.w) moveDirection.z += 1;
     if (this.keys.s) moveDirection.z -= 1;
-    if (this.keys.a) moveDirection.x += 1;
-    if (this.keys.d) moveDirection.x -= 1;
+    if (this.keys.a) moveDirection.x -= 1;
+    if (this.keys.d) moveDirection.x += 1;
+    
+    // Handle E key interaction
+    this._handleInteraction();
     
     if (moveDirection.length() > 0) {
       moveDirection.normalize();
@@ -260,8 +258,104 @@ export class GameWorld3D {
     // Update player group position and rotation
     this.playerGroup.position.copy(this.playerPosition);
     this.playerGroup.rotation.y = this.playerRotation;
+    
+    // Update carried cat position
+    if (this.carriedCat) {
+      this.carriedCat.mesh.position.copy(this.playerPosition);
+      this.carriedCat.mesh.position.y = 1.5;
+      this.carriedCat.mesh.position.x += Math.sin(this.playerRotation) * 0.8;
+      this.carriedCat.mesh.position.z += Math.cos(this.playerRotation) * 0.8;
+    }
   }
   
+  _handleInteraction() {
+    if (!this.keys.e) {
+      this._cancelInteraction();
+      return;
+    }
+    
+    if (this.isInteracting) {
+      const elapsed = Date.now() - this.interactionStartTime;
+      this.interactionProgress = Math.min(elapsed / this.interactionDuration, 1);
+      
+      if (this.interactionProgress >= 1) {
+        this._completeInteraction();
+      }
+    } else {
+      // Start new interaction
+      this._checkNearbyObjects();
+      
+      if (this.nearbyCat && !this.carriedCat) {
+        this._startInteraction('pickup');
+      } else if (this.nearbySlot && this.carriedCat) {
+        this._startInteraction('place');
+      }
+    }
+  }
+  
+  _checkNearbyObjects() {
+    this.nearbyCat = null;
+    this.nearbySlot = null;
+    
+    // Check nearby cats
+    for (const cat of this.catsOnMap) {
+      const dist = this.playerPosition.distanceTo(cat.mesh.position);
+      if (dist < 2.5) {
+        this.nearbyCat = cat;
+        break;
+      }
+    }
+    
+    // Check nearby slots (only if carrying a cat)
+    if (this.carriedCat && this.slotMeshes.length > 0) {
+      for (let i = 0; i < this.slotMeshes.length; i++) {
+        const slot = this.slotMeshes[i];
+        if (!slot.catGroup.visible) { // Only empty slots
+          const worldPos = new THREE.Vector3();
+          slot.root.getWorldPosition(worldPos);
+          const dist = this.playerPosition.distanceTo(worldPos);
+          if (dist < 2.5) {
+            this.nearbySlot = { slot, index: i };
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  _startInteraction(type) {
+    this.isInteracting = true;
+    this.interactionType = type;
+    this.interactionStartTime = Date.now();
+    this.interactionProgress = 0;
+  }
+  
+  _cancelInteraction() {
+    this.isInteracting = false;
+    this.interactionProgress = 0;
+    this.interactionType = null;
+  }
+  
+  _completeInteraction() {
+    if (this.interactionType === 'pickup' && this.nearbyCat) {
+      // Pick up the cat
+      this.carriedCat = this.nearbyCat;
+      // Remove from map
+      const index = this.catsOnMap.indexOf(this.nearbyCat);
+      if (index > -1) {
+        this.catsOnMap.splice(index, 1);
+      }
+      this.onCatPickup?.(this.carriedCat.type);
+    } else if (this.interactionType === 'place' && this.nearbySlot) {
+      // Place cat in slot
+      this.onCatPlace?.(this.nearbySlot.index, this.carriedCat.type);
+      // Remove carried cat
+      this.carriedCat = null;
+    }
+    
+    this._cancelInteraction();
+  }
+
   _checkCollision(x, z) {
     const playerRadius = 0.5;
     
@@ -396,7 +490,7 @@ export class GameWorld3D {
   _buildEnvironment() {
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(100, 100),
-      new THREE.MeshStandardMaterial({ color: 0x12151c, roughness: 0.9 })
+      new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.9 })
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.01;
@@ -409,8 +503,63 @@ export class GameWorld3D {
     
     // Add some decorative elements
     this._addDecorations();
+    
+    // Spawn cats around the map
+    this._spawnCatsOnMap();
   }
   
+  _spawnCatsOnMap() {
+    const catCount = 15;
+    for (let i = 0; i < catCount; i++) {
+      const x = (Math.random() - 0.5) * 60;
+      const z = (Math.random() - 0.5) * 60;
+      
+      // Avoid center area where player starts
+      if (Math.abs(x) < 8 && Math.abs(z) < 8) continue;
+      
+      const catType = CAT_TYPES[Math.floor(Math.random() * CAT_TYPES.length)];
+      const cat = this._createRoamingCat(x, z, catType);
+      this.catsOnMap.push({ mesh: cat, type: catType, id: i });
+    }
+  }
+  
+  _createRoamingCat(x, z, type) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    
+    const hex = CAT_COLORS[type] || CAT_COLORS.tabby;
+    
+    // Body
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 0.6, 1.2),
+      new THREE.MeshStandardMaterial({ color: hex })
+    );
+    body.position.y = 0.35;
+    body.castShadow = true;
+    
+    // Head
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.38, 12, 12),
+      new THREE.MeshStandardMaterial({ color: hex })
+    );
+    head.position.set(0, 0.85, 0.35);
+    head.castShadow = true;
+    
+    // Ears
+    const earGeo = new THREE.ConeGeometry(0.12, 0.22, 4);
+    const darker = new THREE.Color(hex).multiplyScalar(0.75);
+    const earMat = new THREE.MeshStandardMaterial({ color: darker });
+    const earL = new THREE.Mesh(earGeo, earMat);
+    earL.position.set(-0.2, 1.1, 0.35);
+    const earR = earL.clone();
+    earR.position.x = 0.2;
+    
+    group.add(body, head, earL, earR);
+    this.scene.add(group);
+    
+    return group;
+  }
+
   _addDecorations() {
     // Add varied structures around the map
     for (let i = 0; i < 30; i++) {
@@ -781,6 +930,12 @@ export class GameWorld3D {
       }
     });
     
+    // Animate roaming cats
+    this.catsOnMap.forEach((cat, i) => {
+      cat.mesh.position.y = 0.35 + Math.sin(t * 1.5 + i) * 0.05;
+      cat.mesh.rotation.y = Math.sin(t * 0.5 + i) * 0.3;
+    });
+    
     // Animate player character (walking animation)
     const isMoving = this.playerVelocity.length() > 0.01;
     if (isMoving) {
@@ -811,4 +966,8 @@ export class GameWorld3D {
   dispose() {
     this.renderer.dispose();
   }
+  
+  // Callbacks for game.js to handle
+  onCatPickup = null;
+  onCatPlace = null;
 }
