@@ -24,9 +24,16 @@ export class GameWorld3D {
     this.playerPosition = new THREE.Vector3(0, 0, 8);
     this.playerRotation = 0;
     this.playerVelocity = new THREE.Vector3();
-    this.keys = { w: false, a: false, s: false, d: false };
+    this.keys = { w: false, a: false, s: false, d: false, space: false };
     this.playerSpeed = 0.15;
     this.rotationSpeed = 0.05;
+    
+    // Jump physics (Roblox-like)
+    this.isGrounded = true;
+    this.jumpVelocity = 0;
+    this.gravity = -0.015;
+    this.jumpForce = 0.35;
+    this.groundY = 0;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0f1116);
@@ -82,12 +89,18 @@ export class GameWorld3D {
       if (this.keys.hasOwnProperty(key)) {
         this.keys[key] = true;
       }
+      if (e.code === 'Space') {
+        this.keys.space = true;
+      }
     });
     
     window.addEventListener('keyup', (e) => {
       const key = e.key.toLowerCase();
       if (this.keys.hasOwnProperty(key)) {
         this.keys[key] = false;
+      }
+      if (e.code === 'Space') {
+        this.keys.space = false;
       }
     });
   }
@@ -169,11 +182,30 @@ export class GameWorld3D {
         this.playerRotation = targetRotation;
       }
     } else {
-      this.playerVelocity.multiplyScalar(0.9); // Friction
+      this.playerVelocity.x *= 0.9; // Friction
+      this.playerVelocity.z *= 0.9;
     }
     
-    // Apply velocity
-    this.playerPosition.add(this.playerVelocity);
+    // Apply horizontal velocity
+    this.playerPosition.x += this.playerVelocity.x;
+    this.playerPosition.z += this.playerVelocity.z;
+    
+    // Jump physics
+    if (this.keys.space && this.isGrounded) {
+      this.jumpVelocity = this.jumpForce;
+      this.isGrounded = false;
+    }
+    
+    // Apply gravity
+    this.jumpVelocity += this.gravity;
+    this.playerPosition.y += this.jumpVelocity;
+    
+    // Ground detection
+    if (this.playerPosition.y <= this.groundY) {
+      this.playerPosition.y = this.groundY;
+      this.jumpVelocity = 0;
+      this.isGrounded = true;
+    }
     
     // Clamp position to map bounds
     this.playerPosition.x = Math.max(-35, Math.min(35, this.playerPosition.x));
