@@ -25,8 +25,13 @@ export class GameWorld3D {
     this.playerRotation = 0;
     this.playerVelocity = new THREE.Vector3();
     this.keys = { w: false, a: false, s: false, d: false, space: false };
-    this.playerSpeed = 0.15;
+    this.playerSpeed = 0.08;
     this.rotationSpeed = 0.05;
+    
+    // Mouse look
+    this.mouseSensitivity = 0.002;
+    this.cameraPitch = 0;
+    this.isPointerLocked = false;
     
     // Jump physics (Roblox-like)
     this.isGrounded = true;
@@ -34,10 +39,16 @@ export class GameWorld3D {
     this.gravity = -0.015;
     this.jumpForce = 0.35;
     this.groundY = 0;
+    
+    // Particle system
+    this.particles = [];
+    
+    // Collision objects
+    this.colliders = [];
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f1116);
-    this.scene.fog = new THREE.Fog(0x0f1116, 20, 80);
+    this.scene.background = new THREE.Color(0x1a1f2e);
+    this.scene.fog = new THREE.Fog(0x1a1f2e, 30, 120);
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -72,15 +83,24 @@ export class GameWorld3D {
   }
 
   _setupLights() {
-    this.scene.add(new THREE.AmbientLight(0x404060, 0.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.1);
-    sun.position.set(10, 18, 8);
+    this.scene.add(new THREE.AmbientLight(0x606080, 0.8));
+    const sun = new THREE.DirectionalLight(0xfff5e6, 1.2);
+    sun.position.set(15, 25, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 100;
+    sun.shadow.camera.left = -50;
+    sun.shadow.camera.right = 50;
+    sun.shadow.camera.top = 50;
+    sun.shadow.camera.bottom = -50;
     this.scene.add(sun);
-    const fill = new THREE.PointLight(0x3b82f6, 0.35, 40);
-    fill.position.set(-6, 6, -4);
+    const fill = new THREE.PointLight(0x4a90d9, 0.5, 50);
+    fill.position.set(-10, 10, -10);
     this.scene.add(fill);
+    const rim = new THREE.PointLight(0xff6b35, 0.3, 40);
+    rim.position.set(15, 8, -15);
+    this.scene.add(rim);
   }
 
   _setupControls() {
@@ -101,6 +121,23 @@ export class GameWorld3D {
       }
       if (e.code === 'Space') {
         this.keys.space = false;
+      }
+    });
+    
+    // Pointer lock for mouse look
+    this.canvas.addEventListener('click', () => {
+      this.canvas.requestPointerLock();
+    });
+    
+    document.addEventListener('pointerlockchange', () => {
+      this.isPointerLocked = document.pointerLockElement === this.canvas;
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (this.isPointerLocked) {
+        this.playerRotation -= e.movementX * this.mouseSensitivity;
+        this.cameraPitch -= e.movementY * this.mouseSensitivity;
+        this.cameraPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.cameraPitch));
       }
     });
   }
@@ -158,7 +195,7 @@ export class GameWorld3D {
   }
 
   _updatePlayerMovement() {
-    // Calculate movement direction based on player rotation
+    // Calculate movement direction relative to camera
     const moveDirection = new THREE.Vector3();
     
     if (this.keys.w) moveDirection.z += 1;
@@ -169,31 +206,37 @@ export class GameWorld3D {
     if (moveDirection.length() > 0) {
       moveDirection.normalize();
       
-      // Rotate movement direction by player rotation
+      // Rotate movement direction by player rotation (controlled by mouse)
       const rotatedX = moveDirection.x * Math.cos(this.playerRotation) - moveDirection.z * Math.sin(this.playerRotation);
       const rotatedZ = moveDirection.x * Math.sin(this.playerRotation) + moveDirection.z * Math.cos(this.playerRotation);
       
       this.playerVelocity.x = rotatedX * this.playerSpeed;
       this.playerVelocity.z = rotatedZ * this.playerSpeed;
-      
-      // Rotate player towards movement direction
-      if (this.keys.w || this.keys.s || this.keys.a || this.keys.d) {
-        const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
-        this.playerRotation = targetRotation;
-      }
     } else {
       this.playerVelocity.x *= 0.9; // Friction
       this.playerVelocity.z *= 0.9;
     }
     
-    // Apply horizontal velocity
-    this.playerPosition.x += this.playerVelocity.x;
-    this.playerPosition.z += this.playerVelocity.z;
+    // Apply horizontal velocity with collision detection
+    const newX = this.playerPosition.x + this.playerVelocity.x;
+    const newZ = this.playerPosition.z + this.playerVelocity.z;
+    
+    // Check X movement collision
+    if (!this._checkCollision(newX, this.playerPosition.z)) {
+      this.playerPosition.x = newX;
+    }
+    
+    // Check Z movement collision
+    if (!this._checkCollision(this.playerPosition.x, newZ)) {
+      this.playerPosition.z = newZ;
+    }
     
     // Jump physics
+    const wasGrounded = this.isGrounded;
     if (this.keys.space && this.isGrounded) {
       this.jumpVelocity = this.jumpForce;
       this.isGrounded = false;
+      this._createJumpParticles();
     }
     
     // Apply gravity
@@ -204,6 +247,9 @@ export class GameWorld3D {
     if (this.playerPosition.y <= this.groundY) {
       this.playerPosition.y = this.groundY;
       this.jumpVelocity = 0;
+      if (!wasGrounded) {
+        this._createLandParticles();
+      }
       this.isGrounded = true;
     }
     
@@ -215,17 +261,136 @@ export class GameWorld3D {
     this.playerGroup.position.copy(this.playerPosition);
     this.playerGroup.rotation.y = this.playerRotation;
   }
+  
+  _checkCollision(x, z) {
+    const playerRadius = 0.5;
+    
+    for (const collider of this.colliders) {
+      const halfWidth = collider.width / 2 + playerRadius;
+      const halfDepth = collider.depth / 2 + playerRadius;
+      
+      if (x > collider.position.x - halfWidth &&
+          x < collider.position.x + halfWidth &&
+          z > collider.position.z - halfDepth &&
+          z < collider.position.z + halfDepth) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   _updateCamera() {
-    // Calculate camera position behind player
+    // Calculate camera position behind player with mouse look
     const cameraOffset = this.cameraOffset.clone();
+    
+    // Apply horizontal rotation (yaw)
     cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.playerRotation);
+    
+    // Apply vertical rotation (pitch)
+    const pitchAxis = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.playerRotation);
+    cameraOffset.applyAxisAngle(pitchAxis, this.cameraPitch);
     
     this.camera.position.copy(this.playerPosition).add(cameraOffset);
     
-    // Look at player
-    const lookTarget = this.playerPosition.clone().add(this.cameraLookOffset);
+    // Look at player with vertical offset based on pitch
+    const lookTarget = this.playerPosition.clone();
+    lookTarget.y += 2 + Math.sin(this.cameraPitch) * 3;
     this.camera.lookAt(lookTarget);
+  }
+  
+  _createJumpParticles() {
+    const particleCount = 15;
+    for (let i = 0; i < particleCount; i++) {
+      const geometry = new THREE.SphereGeometry(0.08, 8, 8);
+      const material = new THREE.MeshBasicMaterial({ 
+        color: 0xaaaaaa,
+        transparent: true,
+        opacity: 0.8
+      });
+      const particle = new THREE.Mesh(geometry, material);
+      
+      // Position at player's feet
+      particle.position.copy(this.playerPosition);
+      particle.position.y = 0.1;
+      
+      // Random spread
+      particle.position.x += (Math.random() - 0.5) * 0.8;
+      particle.position.z += (Math.random() - 0.5) * 0.8;
+      
+      // Velocity
+      const velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.05,
+        Math.random() * 0.1 + 0.05,
+        (Math.random() - 0.5) * 0.05
+      );
+      
+      this.scene.add(particle);
+      this.particles.push({ mesh: particle, velocity, life: 1.0 });
+    }
+  }
+  
+  _createLandParticles() {
+    const particleCount = 20;
+    for (let i = 0; i < particleCount; i++) {
+      const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+      const material = new THREE.MeshBasicMaterial({ 
+        color: 0x888888,
+        transparent: true,
+        opacity: 0.9
+      });
+      const particle = new THREE.Mesh(geometry, material);
+      
+      // Position at player's feet
+      particle.position.copy(this.playerPosition);
+      particle.position.y = 0.05;
+      
+      // Random spread
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.random() * 0.6;
+      particle.position.x += Math.cos(angle) * radius;
+      particle.position.z += Math.sin(angle) * radius;
+      
+      // Velocity - outward burst
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * (Math.random() * 0.08 + 0.02),
+        Math.random() * 0.15 + 0.05,
+        Math.sin(angle) * (Math.random() * 0.08 + 0.02)
+      );
+      
+      this.scene.add(particle);
+      this.particles.push({ mesh: particle, velocity, life: 1.0 });
+    }
+  }
+  
+  _updateParticles() {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= 0.03;
+      
+      if (p.life <= 0) {
+        this.scene.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        p.mesh.material.dispose();
+        this.particles.splice(i, 1);
+        continue;
+      }
+      
+      // Update position
+      p.mesh.position.add(p.velocity);
+      p.velocity.y -= 0.005; // Gravity on particles
+      
+      // Bounce off ground
+      if (p.mesh.position.y < 0.05) {
+        p.mesh.position.y = 0.05;
+        p.velocity.y *= -0.3;
+        p.velocity.x *= 0.7;
+        p.velocity.z *= 0.7;
+      }
+      
+      // Fade out
+      p.mesh.material.opacity = p.life * 0.8;
+      p.mesh.scale.setScalar(p.life);
+    }
   }
 
   _buildEnvironment() {
@@ -247,28 +412,114 @@ export class GameWorld3D {
   }
   
   _addDecorations() {
-    // Add some random structures around the map
-    for (let i = 0; i < 20; i++) {
+    // Add varied structures around the map
+    for (let i = 0; i < 30; i++) {
       const x = (Math.random() - 0.5) * 70;
       const z = (Math.random() - 0.5) * 70;
       
       // Avoid center area where player starts
       if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
       
-      const height = 2 + Math.random() * 4;
-      const width = 2 + Math.random() * 3;
+      const type = Math.random();
       
-      const building = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, width),
-        new THREE.MeshStandardMaterial({ 
-          color: 0x1a1f28,
-          roughness: 0.8
+      if (type < 0.5) {
+        // Tall buildings
+        const height = 3 + Math.random() * 6;
+        const width = 2 + Math.random() * 3;
+        
+        const building = new THREE.Mesh(
+          new THREE.BoxGeometry(width, height, width),
+          new THREE.MeshStandardMaterial({ 
+            color: 0x1a1f28,
+            roughness: 0.8
+          })
+        );
+        building.position.set(x, height / 2, z);
+        building.castShadow = true;
+        building.receiveShadow = true;
+        this.scene.add(building);
+        
+        this.colliders.push({
+          position: new THREE.Vector3(x, 0, z),
+          width: width,
+          depth: width,
+          height: height
+        });
+      } else if (type < 0.75) {
+        // Low platforms/ramps
+        const width = 3 + Math.random() * 4;
+        const height = 0.5 + Math.random() * 1;
+        
+        const platform = new THREE.Mesh(
+          new THREE.BoxGeometry(width, height, width),
+          new THREE.MeshStandardMaterial({ 
+            color: 0x2a3140,
+            roughness: 0.7
+          })
+        );
+        platform.position.set(x, height / 2, z);
+        platform.castShadow = true;
+        platform.receiveShadow = true;
+        this.scene.add(platform);
+        
+        this.colliders.push({
+          position: new THREE.Vector3(x, 0, z),
+          width: width,
+          depth: width,
+          height: height
+        });
+      } else {
+        // Pillars/columns
+        const height = 4 + Math.random() * 3;
+        const radius = 0.5 + Math.random() * 0.5;
+        
+        const pillar = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, height, 8),
+          new THREE.MeshStandardMaterial({ 
+            color: 0x252a35,
+            roughness: 0.6
+          })
+        );
+        pillar.position.set(x, height / 2, z);
+        pillar.castShadow = true;
+        pillar.receiveShadow = true;
+        this.scene.add(pillar);
+        
+        this.colliders.push({
+          position: new THREE.Vector3(x, 0, z),
+          width: radius * 2,
+          depth: radius * 2,
+          height: height
+        });
+      }
+    }
+    
+    // Add some glowing orbs for atmosphere
+    for (let i = 0; i < 15; i++) {
+      const x = (Math.random() - 0.5) * 60;
+      const z = (Math.random() - 0.5) * 60;
+      
+      if (Math.abs(x) < 8 && Math.abs(z) < 8) continue;
+      
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 16, 16),
+        new THREE.MeshBasicMaterial({ 
+          color: Math.random() > 0.5 ? 0x3b82f6 : 0x8b5cf6,
+          transparent: true,
+          opacity: 0.8
         })
       );
-      building.position.set(x, height / 2, z);
-      building.castShadow = true;
-      building.receiveShadow = true;
-      this.scene.add(building);
+      orb.position.set(x, 1.5 + Math.random() * 2, z);
+      this.scene.add(orb);
+      
+      // Add point light to orb
+      const light = new THREE.PointLight(
+        Math.random() > 0.5 ? 0x3b82f6 : 0x8b5cf6,
+        0.5,
+        8
+      );
+      light.position.copy(orb.position);
+      this.scene.add(light);
     }
   }
 
@@ -519,6 +770,9 @@ export class GameWorld3D {
     this._updatePlayerMovement();
     this._updateCamera();
     
+    // Update particles
+    this._updateParticles();
+    
     // Animate cats
     const t = performance.now() * 0.001;
     this.slotMeshes.forEach((s, i) => {
@@ -527,11 +781,28 @@ export class GameWorld3D {
       }
     });
     
-    // Animate player character (simple bobbing when moving)
-    if (this.playerVelocity.length() > 0.01) {
-      this.playerGroup.position.y = this.playerPosition.y + Math.sin(t * 10) * 0.05;
+    // Animate player character (walking animation)
+    const isMoving = this.playerVelocity.length() > 0.01;
+    if (isMoving) {
+      // Bobbing motion
+      this.playerGroup.position.y = this.playerPosition.y + Math.abs(Math.sin(t * 8)) * 0.08;
+      
+      // Arm and leg swinging
+      const swingAmount = Math.sin(t * 8) * 0.4;
+      this.playerGroup.children.forEach((child, index) => {
+        // Left arm (index 2), right arm (index 3), left leg (index 4), right leg (index 5)
+        if (index === 2 || index === 5) {
+          child.rotation.x = swingAmount;
+        } else if (index === 3 || index === 4) {
+          child.rotation.x = -swingAmount;
+        }
+      });
     } else {
       this.playerGroup.position.y = this.playerPosition.y;
+      // Reset limb rotations
+      this.playerGroup.children.forEach((child) => {
+        child.rotation.x = 0;
+      });
     }
     
     this.renderer.render(this.scene, this.camera);
