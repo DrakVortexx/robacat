@@ -39,9 +39,9 @@ export class GameWorld3D {
       200
     );
     
-    // Third-person camera setup
-    this.cameraOffset = new THREE.Vector3(0, 4, -8);
-    this.cameraLookOffset = new THREE.Vector3(0, 2, 5);
+    // Third-person camera setup - back-looking view
+    this.cameraOffset = new THREE.Vector3(0, 5, -10);
+    this.cameraLookOffset = new THREE.Vector3(0, 2, 0);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
